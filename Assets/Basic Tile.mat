@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Basic Tile
-  m_Shader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
+  m_Shader: {fileID: 4800000, guid: 07a7afaa03f8a684ca57bbf22374da01, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -17,8 +17,7 @@ Material:
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 1
   m_CustomRenderQueue: -1
-  stringTagMap:
-    RenderType: Opaque
+  stringTagMap: {}
   disabledShaderPasses:
   - MOTIONVECTORS
   m_LockedProperties: 
@@ -98,12 +97,15 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
+    - _EmissionIntensity: 2.5
     - _EnvironmentReflections: 1
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _Metallic: 0
     - _OcclusionStrength: 1
+    - _OutlineSoftness: 0.005
+    - _OutlineThickness: 0.06
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
@@ -122,6 +124,10 @@ Material:
     m_Colors:
     - _BaseColor: {r: 0.29251206, g: 0.3069656, b: 0.36477977, a: 1}
     - _Color: {r: 0.29251203, g: 0.30696556, b: 0.36477974, a: 1}
+    - _ColorBL: {r: 0.07036011, g: 0.07618539, b: 0.10946172, a: 1}
+    - _ColorBR: {r: 0.07036011, g: 0.07618539, b: 0.10946172, a: 1}
+    - _ColorTL: {r: 0.07036011, g: 0.07618539, b: 0.10946172, a: 1}
+    - _ColorTR: {r: 0.07036011, g: 0.07618539, b: 0.10946172, a: 1}
     - _EmissionColor: {r: 0.02258168, g: 0.049943935, b: 0.036504913, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
