@@ -1,5 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -9,24 +7,23 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using static Unity.Mathematics.math;
 
+static class MarchingCubesShaderPropertyIds
+{
+    public static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+    public static readonly int LowTint = Shader.PropertyToID("_LowTint");
+    public static readonly int HighTint = Shader.PropertyToID("_HighTint");
+    public static readonly int AccentTint = Shader.PropertyToID("_AccentTint");
+    public static readonly int EdgeGlowStrength = Shader.PropertyToID("_EdgeGlowStrength");
+    public static readonly int ChunkHalfExtents = Shader.PropertyToID("_ChunkHalfExtents");
+    public static readonly int MinSurfaceHeight = Shader.PropertyToID("_MinSurfaceHeight");
+    public static readonly int MaxSurfaceHeight = Shader.PropertyToID("_MaxSurfaceHeight");
+    public static readonly int WallGradientStrength = Shader.PropertyToID("_WallGradientStrength");
+}
+
 [ExecuteAlways]
 [DisallowMultipleComponent]
-[RequireComponent(typeof(Transform))]
 public sealed class MarchingCubesTerrain : MonoBehaviour
 {
-    [Serializable]
-    struct TerrainStamp
-    {
-        public Vector3 localCenter;
-        public float radius;
-        public float densityDelta;
-        public Color tint;
-        public float tintBlend;
-        public float eventRadius;
-        public float eventWidth;
-        public float eventStrength;
-    }
-
     struct VoxelSample
     {
         public float density;
@@ -47,18 +44,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         public VertexData c;
     }
 
-    struct EditStampData
-    {
-        public float3 localCenter;
-        public float radius;
-        public float densityDelta;
-        public float4 tint;
-        public float tintBlend;
-        public float eventRadius;
-        public float eventWidth;
-        public float eventStrength;
-    }
-
     [Header("Chunk")]
     [SerializeField, Min(2)] int cellsX = 30;
     [SerializeField, Min(2)] int cellsY = 10;
@@ -77,12 +62,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
     [SerializeField] Color lowTint = new(0.12f, 0.87f, 1f, 0.66f);
     [SerializeField] Color highTint = new(1f, 0.55f, 0.25f, 0.92f);
     [SerializeField] Color accentTint = new(0.55f, 1f, 0.95f, 1f);
-    [SerializeField] Color eventTint = new(1f, 0.35f, 0.1f, 1f);
-    [SerializeField, Min(0f)] float gridScale = 1.2f;
-    [SerializeField, Range(0.001f, 0.25f)] float gridLineWidth = 0.055f;
-    [SerializeField, Min(0f)] float contourScale = 1.8f;
-    [SerializeField, Range(0.001f, 0.25f)] float contourLineWidth = 0.04f;
-    [SerializeField, Min(0f)] float emissionStrength = 1.4f;
     [SerializeField, Min(0f)] float edgeGlowStrength = 1.0f;
     [Tooltip("How strongly walls use the vertical low->high height gradient instead of their column's surface color.")]
     [SerializeField, Range(0f, 1f)] float wallGradientStrength = 1.0f;
@@ -103,36 +82,14 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         new(VertexAttribute.Color, VertexAttributeFormat.Float32, 4),
     };
 
-    static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-    static readonly int LowTintId = Shader.PropertyToID("_LowTint");
-    static readonly int HighTintId = Shader.PropertyToID("_HighTint");
-    static readonly int AccentTintId = Shader.PropertyToID("_AccentTint");
-    static readonly int EventTintId = Shader.PropertyToID("_EventTint");
-    static readonly int GridScaleId = Shader.PropertyToID("_GridScale");
-    static readonly int GridLineWidthId = Shader.PropertyToID("_GridLineWidth");
-    static readonly int ContourScaleId = Shader.PropertyToID("_ContourScale");
-    static readonly int ContourLineWidthId = Shader.PropertyToID("_ContourLineWidth");
-    static readonly int EmissionStrengthId = Shader.PropertyToID("_EmissionStrength");
-    static readonly int EdgeGlowStrengthId = Shader.PropertyToID("_EdgeGlowStrength");
-    static readonly int ChunkHalfExtentsId = Shader.PropertyToID("_ChunkHalfExtents");
-    static readonly int MinSurfaceHeightId = Shader.PropertyToID("_MinSurfaceHeight");
-    static readonly int MaxSurfaceHeightId = Shader.PropertyToID("_MaxSurfaceHeight");
-    static readonly int WallGradientStrengthId = Shader.PropertyToID("_WallGradientStrength");
-    static readonly int EventCenterRadiusId = Shader.PropertyToID("_EventCenterRadius");
-    static readonly int EventWidthId = Shader.PropertyToID("_EventWidth");
-    static readonly int EventStrengthId = Shader.PropertyToID("_EventStrength");
-    static readonly int EventPulseId = Shader.PropertyToID("_EventPulse");
-
     MeshFilter meshFilter;
     MeshRenderer meshRenderer;
     Mesh mesh;
     Material generatedMaterial;
     MaterialPropertyBlock propertyBlock;
 
-    readonly List<TerrainStamp> stamps = new();
     Vector2 scrollOffset;
     bool dirty = true;
-    float lastRebuildTime;
 
     public Vector3 NoiseSampleWorldPosition
     {
@@ -146,7 +103,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
 
     // Persistent job buffers, reused every rebuild so scrolling doesn't allocate.
     NativeArray<VoxelSample> samples;
-    NativeList<EditStampData> editStamps;
     NativeList<Triangle> triangles;
     int3 allocatedSampleCounts;
     int meshVertexCapacity;
@@ -182,41 +138,7 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         new(3, 7),
     };
 
-    static readonly int[] EdgeTable = new int[256] {
-            0x0  , 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
-            0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
-            0x190, 0x99 , 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c,
-            0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90,
-            0x230, 0x339, 0x33 , 0x13a, 0x636, 0x73f, 0x435, 0x53c,
-            0xa3c, 0xb35, 0x83f, 0x936, 0xe3a, 0xf33, 0xc39, 0xd30,
-            0x3a0, 0x2a9, 0x1a3, 0xaa , 0x7a6, 0x6af, 0x5a5, 0x4ac,
-            0xbac, 0xaa5, 0x9af, 0x8a6, 0xfaa, 0xea3, 0xda9, 0xca0,
-            0x460, 0x569, 0x663, 0x76a, 0x66 , 0x16f, 0x265, 0x36c,
-            0xc6c, 0xd65, 0xe6f, 0xf66, 0x86a, 0x963, 0xa69, 0xb60,
-            0x5f0, 0x4f9, 0x7f3, 0x6fa, 0x1f6, 0xff , 0x3f5, 0x2fc,
-            0xdfc, 0xcf5, 0xfff, 0xef6, 0x9fa, 0x8f3, 0xbf9, 0xaf0,
-            0x650, 0x759, 0x453, 0x55a, 0x256, 0x35f, 0x55 , 0x15c,
-            0xe5c, 0xf55, 0xc5f, 0xd56, 0xa5a, 0xb53, 0x859, 0x950,
-            0x7c0, 0x6c9, 0x5c3, 0x4ca, 0x3c6, 0x2cf, 0x1c5, 0xcc ,
-            0xfcc, 0xec5, 0xdcf, 0xcc6, 0xbca, 0xac3, 0x9c9, 0x8c0,
-            0x8c0, 0x9c9, 0xac3, 0xbca, 0xcc6, 0xdcf, 0xec5, 0xfcc,
-            0xcc , 0x1c5, 0x2cf, 0x3c6, 0x4ca, 0x5c3, 0x6c9, 0x7c0,
-            0x950, 0x859, 0xb53, 0xa5a, 0xd56, 0xc5f, 0xf55, 0xe5c,
-            0x15c, 0x55 , 0x35f, 0x256, 0x55a, 0x453, 0x759, 0x650,
-            0xaf0, 0xbf9, 0x8f3, 0x9fa, 0xef6, 0xfff, 0xcf5, 0xdfc,
-            0x2fc, 0x3f5, 0xff , 0x1f6, 0x6fa, 0x7f3, 0x4f9, 0x5f0,
-            0xb60, 0xa69, 0x963, 0x86a, 0xf66, 0xe6f, 0xd65, 0xc6c,
-            0x36c, 0x265, 0x16f, 0x66 , 0x76a, 0x663, 0x569, 0x460,
-            0xca0, 0xda9, 0xea3, 0xfaa, 0x8a6, 0x9af, 0xaa5, 0xbac,
-            0x4ac, 0x5a5, 0x6af, 0x7a6, 0xaa , 0x1a3, 0x2a9, 0x3a0,
-            0xd30, 0xc39, 0xf33, 0xe3a, 0x936, 0x83f, 0xb35, 0xa3c,
-            0x53c, 0x435, 0x73f, 0x636, 0x13a, 0x33 , 0x339, 0x230,
-            0xe90, 0xf99, 0xc93, 0xd9a, 0xa96, 0xb9f, 0x895, 0x99c,
-            0x69c, 0x795, 0x49f, 0x596, 0x29a, 0x393, 0x99 , 0x190,
-            0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905, 0x80c,
-            0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x0   };
-
-        static readonly int[] TriTable = new int[]
+    static readonly int[] TriTable = new int[]
         {
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
             0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -618,29 +540,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         dirty = true;
     }
 
-    public void ClearEdits()
-    {
-        stamps.Clear();
-        dirty = true;
-    }
-
-    public void ApplyExplosion(Vector3 worldCenter, float radius, float densityDelta, Color tint, float tintBlend = 0.75f)
-    {
-        stamps.Add(new TerrainStamp
-        {
-            localCenter = transform.InverseTransformPoint(worldCenter),
-            radius = radius,
-            densityDelta = densityDelta,
-            tint = tint,
-            tintBlend = tintBlend,
-            eventRadius = radius,
-            eventWidth = radius * 0.3f,
-            eventStrength = 1f,
-        });
-
-        dirty = true;
-    }
-
     void EnsureComponents()
     {
         if (meshFilter == null && !TryGetComponent(out meshFilter))
@@ -759,32 +658,15 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         propertyBlock ??= new MaterialPropertyBlock();
         propertyBlock.Clear();
 
-        TerrainStamp stamp = stamps.Count > 0 ? stamps[^1] : default;
-        Vector4 eventCenterRadius = stamps.Count > 0
-            ? new Vector4(stamp.localCenter.x, stamp.localCenter.y, stamp.localCenter.z, stamp.eventRadius)
-            : Vector4.zero;
-
-        float eventPulse = stamps.Count > 0 ? Mathf.Clamp01(1f - Mathf.Clamp01((Time.time - lastRebuildTime) * 0.7f)) : 0f;
-
-        propertyBlock.SetColor(BaseColorId, Color.white);
-        propertyBlock.SetColor(LowTintId, lowTint);
-        propertyBlock.SetColor(HighTintId, highTint);
-        propertyBlock.SetColor(AccentTintId, accentTint);
-        propertyBlock.SetColor(EventTintId, eventTint);
-        propertyBlock.SetFloat(GridScaleId, gridScale);
-        propertyBlock.SetFloat(GridLineWidthId, gridLineWidth);
-        propertyBlock.SetFloat(ContourScaleId, contourScale);
-        propertyBlock.SetFloat(ContourLineWidthId, contourLineWidth);
-        propertyBlock.SetFloat(EmissionStrengthId, emissionStrength);
-        propertyBlock.SetFloat(EdgeGlowStrengthId, edgeGlowStrength);
-        propertyBlock.SetVector(ChunkHalfExtentsId, new Vector4(cellsX * cellSize * 0.5f, cellsZ * cellSize * 0.5f, 0f, 0f));
-        propertyBlock.SetFloat(MinSurfaceHeightId, minSurfaceHeight);
-        propertyBlock.SetFloat(MaxSurfaceHeightId, maxSurfaceHeight);
-        propertyBlock.SetFloat(WallGradientStrengthId, wallGradientStrength);
-        propertyBlock.SetVector(EventCenterRadiusId, eventCenterRadius);
-        propertyBlock.SetFloat(EventWidthId, stamps.Count > 0 ? stamp.eventWidth : 0f);
-        propertyBlock.SetFloat(EventStrengthId, stamps.Count > 0 ? stamp.eventStrength : 0f);
-        propertyBlock.SetFloat(EventPulseId, eventPulse);
+        propertyBlock.SetColor(MarchingCubesShaderPropertyIds.BaseColor, Color.white);
+        propertyBlock.SetColor(MarchingCubesShaderPropertyIds.LowTint, lowTint);
+        propertyBlock.SetColor(MarchingCubesShaderPropertyIds.HighTint, highTint);
+        propertyBlock.SetColor(MarchingCubesShaderPropertyIds.AccentTint, accentTint);
+        propertyBlock.SetFloat(MarchingCubesShaderPropertyIds.EdgeGlowStrength, edgeGlowStrength);
+        propertyBlock.SetVector(MarchingCubesShaderPropertyIds.ChunkHalfExtents, new Vector4(cellsX * cellSize * 0.5f, cellsZ * cellSize * 0.5f, 0f, 0f));
+        propertyBlock.SetFloat(MarchingCubesShaderPropertyIds.MinSurfaceHeight, minSurfaceHeight);
+        propertyBlock.SetFloat(MarchingCubesShaderPropertyIds.MaxSurfaceHeight, maxSurfaceHeight);
+        propertyBlock.SetFloat(MarchingCubesShaderPropertyIds.WallGradientStrength, wallGradientStrength);
 
         meshRenderer.SetPropertyBlock(propertyBlock);
     }
@@ -805,28 +687,10 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         }
 
         dirty = false;
-        lastRebuildTime = Time.time;
 
         // One extra ring of forced-air samples on every side so marching cubes closes the volume into walls and a bottom.
         int3 counts = new(cellsX + 3, cellsY + 3, cellsZ + 3);
         EnsureBuffers(counts);
-
-        editStamps.Clear();
-        for (int i = 0; i < stamps.Count; i++)
-        {
-            TerrainStamp stamp = stamps[i];
-            editStamps.Add(new EditStampData
-            {
-                localCenter = stamp.localCenter,
-                radius = stamp.radius,
-                densityDelta = stamp.densityDelta,
-                tint = new float4(stamp.tint.r, stamp.tint.g, stamp.tint.b, stamp.tint.a),
-                tintBlend = stamp.tintBlend,
-                eventRadius = stamp.eventRadius,
-                eventWidth = stamp.eventWidth,
-                eventStrength = stamp.eventStrength,
-            });
-        }
 
         triangles.Clear();
 
@@ -840,7 +704,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         SampleColumnsJob sampleJob = new()
         {
             Samples = samples,
-            EditStamps = editStamps.AsArray(),
             SampleCounts = counts,
             CellSize = cellSize,
             Origin = origin,
@@ -849,8 +712,8 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
             MinSurfaceHeight = minSurfaceHeight,
             MaxSurfaceHeight = maxSurfaceHeight,
             DetailContribution = detailContribution,
-            LowTint = new float4(lowTint.r, lowTint.g, lowTint.b, lowTint.a),
-            HighTint = new float4(highTint.r, highTint.g, highTint.b, highTint.a),
+            LowTint = new float4(lowTint.r, lowTint.g, lowTint.b, 1f),
+            HighTint = new float4(highTint.r, highTint.g, highTint.b, 1f),
         };
 
         BuildMeshJob buildJob = new()
@@ -917,7 +780,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         int cubeCount = (counts.x - 1) * (counts.y - 1) * (counts.z - 1);
 
         samples = new NativeArray<VoxelSample>(sampleCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-        editStamps = new NativeList<EditStampData>(16, Allocator.Persistent);
         // Marching cubes emits at most 5 triangles per cube.
         triangles = new NativeList<Triangle>(cubeCount * 5, Allocator.Persistent);
         allocatedSampleCounts = counts;
@@ -962,7 +824,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
         }
 
         if (samples.IsCreated) samples.Dispose();
-        if (editStamps.IsCreated) editStamps.Dispose();
         if (triangles.IsCreated) triangles.Dispose();
         allocatedSampleCounts = default;
     }
@@ -974,7 +835,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
     struct SampleColumnsJob : IJobParallelFor
     {
         [WriteOnly, NativeDisableParallelForRestriction] public NativeArray<VoxelSample> Samples;
-        [ReadOnly] public NativeArray<EditStampData> EditStamps;
         public int3 SampleCounts;
         public float CellSize;
         public float3 Origin;
@@ -1011,26 +871,6 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
                 float3 localPos = new(columnPos.x, Origin.y + y * CellSize, columnPos.y);
                 float density = localPos.y - surfaceHeight;
                 float3 tint = columnTint;
-                // Accumulated stamp tint weight, consumed by the shader to keep explosion tint on walls.
-                float stampWeight = 0f;
-
-                for (int i = 0; i < EditStamps.Length; i++)
-                {
-                    EditStampData stamp = EditStamps[i];
-                    float distSq = distancesq(localPos, stamp.localCenter);
-                    if (distSq >= stamp.radius * stamp.radius)
-                    {
-                        continue;
-                    }
-
-                    float falloff = 1f - sqrt(distSq) / stamp.radius;
-                    falloff *= falloff;
-
-                    density += stamp.densityDelta * falloff;
-                    float blend = falloff * stamp.tintBlend;
-                    tint = lerp(tint, stamp.tint.xyz, blend);
-                    stampWeight = lerp(stampWeight, 1f, blend);
-                }
 
                 if (edgeColumn || y == 0 || y == SampleCounts.y - 1)
                 {
@@ -1044,7 +884,7 @@ public sealed class MarchingCubesTerrain : MonoBehaviour
                 Samples[baseIndex + SampleCounts.x * y] = new VoxelSample
                 {
                     density = density,
-                    color = new float4(tint, stampWeight),
+                    color = new float4(tint, 1f),
                 };
             }
         }

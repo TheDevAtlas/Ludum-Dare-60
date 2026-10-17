@@ -5,21 +5,12 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 0
-    path: Assets/- Project -/Scenes/Main.unity
+  - enabled: 1
+    path: Assets/- Project -/Scenes/Main Menu.unity
     guid: 99c9720ab356a0642a771bea13969a05
   - enabled: 1
-    path: Assets/- Project -/Scenes/- Bootstrap -.unity
-    guid: 82c4639304203814fa59dbce54e01ff7
-  - enabled: 1
-    path: Assets/- Project -/Scenes/- Main Menu -.unity
-    guid: 3adee1bdfde130b4ca48d617ebcc2271
-  - enabled: 1
-    path: Assets/- Project -/Scenes/- The Hub -.unity
-    guid: b33e8c2acf9638a4ea8ecf19d77149e6
-  - enabled: 1
-    path: Assets/- Project -/Scenes/- The Run -.unity
-    guid: f216c34ca8b59484e87b086d0db40d66
+    path: Assets/- Project -/Scenes/Game.unity
+    guid: 88169ecf8be47a348a7b0d3350aa3b13
   m_configObjects:
     com.unity.addressableassets: {fileID: 11400000, guid: 33a2dd4c55966ae4c9fa2cdbc94901f5, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
